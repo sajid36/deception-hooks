@@ -1,0 +1,15 @@
+﻿  Source.cpp
+c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(10): error C2039: 'cout': is not a member of 'std'
+  c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\predefined c++ types (compiler internal)(208): note: see declaration of 'std'
+c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(10): error C2065: 'cout': undeclared identifier
+c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(16): error C2065: 'REMOTE_ENTRY_INFO': undeclared identifier
+c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(16): error C2065: 'inRemoteInfo': undeclared identifier
+c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(16): warning C4229: anachronism used: modifiers on data are ignored
+c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(16): error C2182: 'NativeInjectionEntryPoint': illegal use of type 'void'
+c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(18): error C2065: 'REMOTE_ENTRY_INFO': undeclared identifier
+c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(18): error C2065: 'inRemoteInfo': undeclared identifier
+c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(18): warning C4229: anachronism used: modifiers on data are ignored
+c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(18): error C2182: 'NativeInjectionEntryPoint': illegal use of type 'void'
+c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(18): error C2374: 'NativeInjectionEntryPoint': redefinition; multiple initialization
+  c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(16): note: see declaration of 'NativeInjectionEntryPoint'
+c:\users\sajid\onedrive\documents\visual studio 2015\projects\winhook\winhook\source.cpp(19): error C2448: 'NativeInjectionEntryPoint': function-style initializer appears to be a function definition
