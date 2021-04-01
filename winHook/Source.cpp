@@ -3,23 +3,29 @@
 
 #include <easyhook.h>
 #include <string>
-#include <iostream>
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <vector>
+#include <cpprest/http_client.h>
+#include <cpprest/json.h>
+#pragma comment(lib, "cpprest_2_10")
+#include <iostream>
 #pragma comment (lib, "Ws2_32.lib")
 #pragma comment (lib, "Mswsock.lib")
 #pragma comment (lib, "AdvApi32.lib")
 
-
+#define BUFFERSIZE 5000
 #define DEFAULT_BUFLEN 512
 #define DEFAULT_PORT "8888"
 #define DEFAULT_IP "localhost"
 
 using namespace std;
+using namespace web;
+using namespace web::http;
+using namespace web::http::client;
 DWORD gFreqOffset = 0;
 HANDLE sensitiveFile;
 HANDLE sourceHandle;
@@ -27,6 +33,8 @@ HANDLE targetHandle;
 vector<pair<HANDLE, HANDLE>> pipePair;
 int pipeCreated=0;
 HANDLE pipeReadHandle = NULL;
+int childProcessReadFlag = 0;
+std::string response;
 
 string honey(string api, string param1) {
 	cout << "inside send" << endl;
@@ -122,6 +130,73 @@ string honey(string api, string param1) {
 	return reply;
 }
 
+void display_json(
+	json::value const & jvalue,
+	utility::string_t const & prefix)
+{
+	wcout << prefix << jvalue.serialize() << endl;
+}
+
+pplx::task<http_response> make_task_request(
+	http_client & client,
+	method mtd,
+	json::value const & jvalue)
+{
+	return (mtd == methods::GET || mtd == methods::HEAD) ?
+		client.request(mtd, L"/victim") :
+		client.request(mtd, L"/victim", jvalue);
+}
+
+wstring make_request(
+	http_client & client,
+	method mtd,
+	json::value const & jvalue)
+{
+	wstring res;
+	make_task_request(client, mtd, jvalue)
+		.then([](http_response response)
+	{
+		if (response.status_code() == status_codes::OK)
+		{
+			return response.extract_json();
+		}
+		return pplx::task_from_result(json::value());
+	})
+		.then([&](pplx::task<json::value> previousTask)
+	{
+		try
+		{
+			display_json(previousTask.get(), L"R: ");
+			json::value const & jvalue = previousTask.get();
+			utility::string_t jsonval = jvalue.serialize();
+			res = jsonval;
+		}
+		catch (http_exception const & e)
+		{
+			wcout << e.what() << endl;
+		}
+	})
+		.wait();
+	return res;
+}
+
+wstring honeyFactory(wstring context, wstring additional) {
+	http_client client(U("http://192.168.56.102:5000/"));
+
+	auto postValue = json::value::object();
+	postValue[L"context"] = json::value::string(context);
+	postValue[L"additional"] = json::value::string(additional);
+
+	wcout << L"\nPOST (get some values)\n";
+	display_json(postValue, L"S: ");
+	wstring response= make_request(client, methods::POST, postValue);
+	wcout << "from honeyFactory: "<< response << endl;
+	return response;
+
+
+}
+
+
 
 HANDLE WINAPI myCreateFileWHook(LPCWSTR lpFileName,
 	DWORD                 dwDesiredAccess,
@@ -131,9 +206,10 @@ HANDLE WINAPI myCreateFileWHook(LPCWSTR lpFileName,
 	DWORD                 dwFlagsAndAttributes,
 	HANDLE                hTemplateFile)
 {
+
 	std::cout << "-> CreateFileW Hook: ****All your CreateFileW belong to us!\n\n";
 	std::wstring lpName = lpFileName;
-
+	
 	wstring ws(lpFileName);
 	string fileName = string(ws.begin(), ws.end());
 	cout << fileName << endl;
@@ -190,25 +266,34 @@ BOOL WINAPI myReadFile(HANDLE hFile,
 		}
 	}
 
-	if (hFile == pipeReadHandle) {
+	else if (hFile == pipeReadHandle && childProcessReadFlag==1) {
+
+
+		cout << "///////////////////special case///////////////: " << endl;
+		cout << pipeReadHandle << endl;
+		cout << childProcessReadFlag << endl;
+		childProcessReadFlag = 0;
+		FlushFileBuffers(hFile);
 		// the target program is accessing sentive file (here it's a text file)
 		//call the actually readfile to check how many bytes it want to read?
-		ReadFile(hFile,
+		BOOL status = ReadFile(hFile,
 			lpBuffer,
 			nNumberOfBytesToRead,
 			lpNumberOfBytesRead,
 			lpOverlapped);
-		// *lpNumberOfBytesRead holds number of bytes to be read. 
-		// if we don't care about the size, we don't need to call ReadFile, We can directly memcpy our provided char array/string
 		if (*lpNumberOfBytesRead > 1) {
-			cout << "connect to honey server to alter content " << endl;
-			char *content = "altered ";
 
-			// check for error and size of the returned buffer.
-			memcpy(lpBuffer, content, strlen(content));
-			*lpNumberOfBytesRead = strlen(content);
-			return TRUE;
+			cout << "memcpy: " << endl;
+			cout << response << endl;
+			memcpy(lpBuffer, response.c_str(), strlen(response.c_str()));
+			*lpNumberOfBytesRead = strlen(response.c_str());
+
+
+			// *lpNumberOfBytesRead holds number of bytes to be read. 
+			// if we don't care about the size, we don't need to call ReadFile, We can directly memcpy our provided char array/string
+			return status;
 		}
+	
 	}
 
 	else {
@@ -217,8 +302,8 @@ BOOL WINAPI myReadFile(HANDLE hFile,
 			nNumberOfBytesToRead,
 			lpNumberOfBytesRead,
 			lpOverlapped);
-		//printf("readfile buffer = %s\n", lpBuffer);
-		//cout << "*****end of readfile******" << endl;
+		printf("readfile buffer = %s\n", lpBuffer);
+		cout << "*****end of readfile******" << endl;
 		return readFileStatus;
 	}
 
@@ -226,16 +311,32 @@ BOOL WINAPI myReadFile(HANDLE hFile,
 DWORD WINAPI myGetCurrentDirectoryW(DWORD  nBufferLength,
 	LPTSTR lpBuffer)
 {
-	string honeyReply = honey("GetCurrentDirectoryW", "None");
-	DWORD returnLength  = honeyReply.length();
+	std::cout << "\n    GetCurrentDirectory Hook: ****All your GetCurrentDirectory belong to us!\n\n";
+	wstring res = honeyFactory(L"currentDirectory", L" ");
+	wcout << "from GetCurrentDirectory hook " << res << endl;
+	
+	
+	//string to json
+	utility::string_t s = res;
+	json::value ret = json::value::parse(s);
+	wcout << ret.at(U("currentDirectory")).as_string() << endl;
+
+	wstring wideRes = ret.at(U("currentDirectory")).as_string();
+
+	//wstring to string
+	std::string localResponse (wideRes.begin(), wideRes.end());
+	response = localResponse;
+	response = response + '\0';
+
+
+	DWORD returnLength  = response.length();
 
 	int i;
-	for (i = 0; i<honeyReply.length(); i++)
+	for (i = 0; i<response.length(); i++)
 	{
-		lpBuffer[i] = honeyReply[i];
+		lpBuffer[i] = response[i];
 	}
 	lpBuffer[i++] = '\0';
-	std::cout << "\n    GetCurrentDirectory Hook: ****All your GetCurrentDirectory belong to us!\n\n";
 	return returnLength;
 }
 
@@ -251,8 +352,10 @@ BOOL WINAPI myCreateProcessHook(LPCWSTR lpApplicationName,
 	LPPROCESS_INFORMATION lpProcessInformation)
 {
 	std::cout << "\n    BeepHook: ****All your CreateProcess belong to us!\n\n";
-	
-	if (pipeCreated >= 2) {
+
+	HANDLE childStdOutput = lpStartupInfo->hStdOutput;
+	wcout << "child handle: " << childStdOutput << endl;
+	if (pipeCreated >= 1) {
 		pipeReadHandle = pipePair[0].first;
 		cout << "pipeReadHandle: " << pipeReadHandle << endl;
 	}
@@ -261,7 +364,25 @@ BOOL WINAPI myCreateProcessHook(LPCWSTR lpApplicationName,
 	{
 		pipePair.pop_back();
 	}
+	wstring wcommand (lpCommandLine);
+	//string command = string(wcommand.begin(), wcommand.end());
 	
+	wstring res = honeyFactory(L"command", wcommand);
+	wcout << "from CreateProcess hook " << res << endl;
+	//string to json
+	utility::string_t s = res;
+	json::value ret = json::value::parse(s);
+	wcout << ret.at(U("response")).as_string() << endl;
+
+	wstring wideRes = ret.at(U("response")).as_string();
+
+	//wstring to string
+	std:string localResponse(wideRes.begin(), wideRes.end());
+	response = localResponse;
+	response = response + '\0';
+
+
+	childProcessReadFlag = 1;
 	BOOL CreateProcessStatus = CreateProcessW(lpApplicationName, lpCommandLine, lpProcessAttributes, lpThreadAttributes, bInheritHandles,
 		dwCreationFlags,
 		lpEnvironment,
@@ -269,9 +390,31 @@ BOOL WINAPI myCreateProcessHook(LPCWSTR lpApplicationName,
 		lpStartupInfo,
 		lpProcessInformation);
 
-	cout << lpStartupInfo << endl;
+	
+	/*FlushFileBuffers(childStdOutput);
+	
+	DWORD dwBytesWritten = 0;
+	char* char_response;
+	string str_obj(response);
+	char_response = &str_obj[0];
+
+	WriteFile(childStdOutput, char_response, strlen(char_response), &dwBytesWritten, NULL);
+
+	
+	
+
+
+
+	
+	/*BOOL CreateProcessStatus = CreateProcessW(lpApplicationName, lpCommandLine, lpProcessAttributes, lpThreadAttributes, bInheritHandles,
+		dwCreationFlags,
+		lpEnvironment,
+		lpCurrentDirectory,
+		lpStartupInfo,
+		lpProcessInformation);
+
+	cout << lpStartupInfo << endl;*/
 	cout << "end of CreateProcessHook" << endl;
-	pipeCreated = 0;
 	return CreateProcessStatus;
 
 }
@@ -334,6 +477,23 @@ BOOL WINAPI myBeepHook(DWORD dwFreq, DWORD dwDuration)
 	return Beep(dwFreq + gFreqOffset, dwDuration);
 }
 
+HANDLE WINAPI myGetClipboardData(UINT uFormat)
+{
+	std::cout << "\n    BeepHook: ****All your GetClipboardData belong to us!\n\n";
+	//string reply = honey("Beep", "");
+	cout << "inside GetClipboardData" << endl;
+	
+	wchar_t s[] = L"msajid@uncc.edu 123456789";
+	HGLOBAL hglbCopy = GetClipboardData(uFormat);
+	LPTSTR lptstrCopy = (LPTSTR)GlobalLock(hglbCopy);
+	memcpy(lptstrCopy, &s,
+		(wcslen(s) + 1) * sizeof(wchar_t));
+	lptstrCopy[sizeof(s)] = (TCHAR)0;    // null character 
+	GlobalUnlock(hglbCopy);
+	SetClipboardData(uFormat, hglbCopy);
+	return lptstrCopy;
+}
+
 // EasyHook will be looking for this export to support DLL injection. If not found then 
 // DLL injection will fail.
 extern "C" void __declspec(dllexport) __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo);
@@ -363,6 +523,7 @@ void __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo)
 	HOOK_TRACE_INFO hHookCreateProcessW = { NULL };
 	//HOOK_TRACE_INFO hHookDuplicateHandle= { NULL };
 	HOOK_TRACE_INFO hHookCreatePipe = { NULL };
+	HOOK_TRACE_INFO hHookGetClipboardData = { NULL };
 
 	//std::cout << "\n";
 	//std::cout << "Win32 Beep found at address: " << GetProcAddress(GetModuleHandle(TEXT("kernel32")), "Beep") << "\n";
@@ -408,7 +569,13 @@ void __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo)
 		NULL,
 		&hHookCreatePipe);
 
-	if (/*FAILED(resultDuplicateHandle) &&*/ FAILED(resultCreatePipe) && FAILED(resultCreateProcessW) && FAILED(resultCreateFileW) && FAILED(resultReadFile) && FAILED(resultGetCurrentDirectoryW) && FAILED(result))
+	NTSTATUS resultGetClipboardData = LhInstallHook(
+		GetProcAddress(GetModuleHandle(TEXT("user32")), "GetClipboardData"),
+		myGetClipboardData,
+		NULL,
+		&hHookGetClipboardData);
+
+	if (FAILED(resultGetClipboardData) && FAILED(resultCreatePipe) && FAILED(resultCreateProcessW) && FAILED(resultCreateFileW) && FAILED(resultReadFile) && FAILED(resultGetCurrentDirectoryW) && FAILED(result))
 	{
 		std::wstring s(RtlGetLastErrorString());
 		std::wcout << "Failed to install hook: ";
@@ -431,6 +598,7 @@ void __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo)
 	LhSetExclusiveACL(ACLEntries, 1, &hHookCreateProcessW);
 	//LhSetExclusiveACL(ACLEntries, 1, &hHookDuplicateHandle);
 	LhSetExclusiveACL(ACLEntries, 1, &hHookCreatePipe);
+	LhSetExclusiveACL(ACLEntries, 1, &hHookGetClipboardData);
 
 	return;
 }
