@@ -11,6 +11,7 @@
 #include <vector>
 #include <cpprest/http_client.h>
 #include <cpprest/json.h>
+#include <shellapi.h>
 #pragma comment(lib, "cpprest_2_10")
 #include <iostream>
 #pragma comment (lib, "Ws2_32.lib")
@@ -20,7 +21,12 @@
 #define BUFFERSIZE 5000
 #define DEFAULT_BUFLEN 512
 #define DEFAULT_PORT "8888"
-#define DEFAULT_IP "localhost"
+#define DEFAULT_IP "localhost" 
+
+#define DECEPTION_STRAT  1 // FakeFailure (Show failure despite success)
+//#define DECEPTION_STRAT  2 // FakeSuccess (Show altered content)
+//#define DECEPTION_STRAT  3 // FakeExecute (Get data from honey factory)
+//#define DECEPTION_STRAT  4 // NativeExecute (Let attacker perform action)
 
 using namespace std;
 using namespace web;
@@ -181,7 +187,7 @@ wstring make_request(
 }
 
 wstring honeyFactory(wstring context, wstring additional) {
-	http_client client(U("http://192.168.56.102:5000/"));
+	http_client client(U("http://192.168.56.106:5000/"));
 
 	auto postValue = json::value::object();
 	postValue[L"context"] = json::value::string(context);
@@ -337,6 +343,7 @@ DWORD WINAPI myGetCurrentDirectoryW(DWORD  nBufferLength,
 		lpBuffer[i] = response[i];
 	}
 	lpBuffer[i++] = '\0';
+	
 	return returnLength;
 }
 
@@ -494,6 +501,239 @@ HANDLE WINAPI myGetClipboardData(UINT uFormat)
 	return lptstrCopy;
 }
 
+BOOL WINAPI myGetComputerNameW(COMPUTER_NAME_FORMAT NameType, LPWSTR lpBuffer, LPDWORD	nSize)
+{
+std:cout << "\n    myGetComputerNameWHook: ****All your ComputerNames belong to us!\n\n";
+	LPVOID honeyReply;
+	switch (NameType) {
+	case (ComputerNameNetBIOS):
+		honeyReply = "NetBiosName";
+	case(ComputerNameDnsHostname):
+		honeyReply = "DnsHostName";
+	case(ComputerNameDnsDomain):
+		honeyReply = "DnsDomaName";
+	case(ComputerNameDnsFullyQualified):
+		honeyReply = "DnsFulQName";
+	case(ComputerNamePhysicalNetBIOS):
+		honeyReply = "PhyNetBName";
+	case(ComputerNamePhysicalDnsHostname):
+		honeyReply = "PhyDnsHName";
+	case(ComputerNamePhysicalDnsDomain):
+		honeyReply = "PhyDnsDName";
+	case(ComputerNamePhysicalDnsFullyQualified):
+		honeyReply = "PhyDFQuName";
+	case(ComputerNameMax):
+		honeyReply = "NameMaxName";
+	default:
+		honeyReply = "DeHoneYName";
+	}
+
+	memcpy(lpBuffer, honeyReply, 11);
+	*nSize = 11;
+	std::cout << (char *)lpBuffer << endl;
+	return true;
+}
+
+BOOL WINAPI myGetVersionExA(LPOSVERSIONINFOA lpVersionInformation)
+{
+std:cout << "\n    myGetVersionExA: ****All your GetVersionExA belong to us!\n\n";
+	DWORD majorver = 5;
+	DWORD minorver = 2;
+	DWORD buildNum = 7699;
+	DWORD platid = 0;
+
+	lpVersionInformation->dwOSVersionInfoSize = 156;
+	lpVersionInformation->dwMajorVersion = majorver;
+	lpVersionInformation->dwMinorVersion = minorver;
+	lpVersionInformation->dwBuildNumber = buildNum;
+	lpVersionInformation->dwPlatformId = platid;
+	strcpy(lpVersionInformation->szCSDVersion, "Service Pack 3");
+	//printf("Modified service pack info is: %s", lpVersionInformation->szCSDVersion);
+
+	return true;
+}
+
+BOOL WINAPI myShellExecuteExW(SHELLEXECUTEINFO *pExecInfo)
+{
+std:cout << "\n    myShellExecuteExW: ****All your ShellExecuteExW belong to us!\n\n";
+
+	SHELLEXECUTEINFOW honeyInfo;
+	honeyInfo.cbSize = pExecInfo->cbSize;
+	honeyInfo.fMask = pExecInfo->fMask;
+	honeyInfo.hwnd = pExecInfo->hwnd;
+	honeyInfo.lpVerb = pExecInfo->lpVerb;
+	honeyInfo.lpParameters = pExecInfo->lpParameters;
+	honeyInfo.lpDirectory = pExecInfo->lpDirectory;
+	honeyInfo.nShow = pExecInfo->nShow;
+	honeyInfo.hInstApp = pExecInfo->hInstApp;
+	honeyInfo.lpIDList = pExecInfo->lpIDList;
+	honeyInfo.hkeyClass = pExecInfo->hkeyClass;
+	honeyInfo.dwHotKey = pExecInfo->dwHotKey;
+	honeyInfo.hIcon = pExecInfo->hIcon;
+	honeyInfo.hMonitor = pExecInfo->hMonitor;
+	honeyInfo.hProcess = pExecInfo->hProcess;
+
+	if (DECEPTION_STRAT == 1) {
+		return ERROR_ACCESS_DENIED;
+	}
+	else if (DECEPTION_STRAT == 2) {
+		LPCWSTR honeyFile = L"C:\\Users\\sajid\\Desktop\\honey.txt";
+		honeyInfo.lpFile = honeyFile;
+		BOOL honeyExecutedFile = ShellExecuteExW(&honeyInfo);
+
+		return honeyExecutedFile;
+	}
+	else if (DECEPTION_STRAT == 3) {
+		wstring res = honeyFactory(L"shellExecute", L" ");
+		wcout << "from shellExecute hook " << res << endl;
+		//string to json
+		utility::string_t str = res;
+		json::value ret = json::value::parse(str);
+		wcout << ret.at(U("response")).as_string() << endl;
+
+		wstring wideRes = ret.at(U("response")).as_string();
+		//wstring to string
+		string localResponse(wideRes.begin(), wideRes.end());
+		response = localResponse;
+		response = response + '\0';
+
+		// Convert response string to wide string
+		wstring wstr = wstring(response.begin(), response.end());
+		//std::replace(wstr.begin(), wstr.end(), '%', '\\');
+		wchar_t const * honeyFile = wstr.c_str();
+		honeyInfo.lpFile = honeyFile;
+
+		BOOL honeyExecutedFile = ShellExecuteExW(&honeyInfo);
+		return honeyExecutedFile;
+	}
+	return ShellExecuteExW(pExecInfo);
+}
+
+int WINAPI mySend(
+	SOCKET     s,
+	const char *buf,
+	int        len,
+	int        flags
+)
+{
+	cout << "\n    mySend: ****All your send belong to us!\n\n";
+	cout << len << endl;
+
+	string sub_str = buf;
+	string com = "System";
+	sub_str = sub_str.substr(1, 6);
+
+	cout << sub_str.compare(com) << endl;
+	
+	if (sub_str.compare(com) == 0) {
+		if (DECEPTION_STRAT == 1) {
+			//string fake(540, ' ');
+			//fake.replace(0, 15, "No survey data");
+			char * content = "No survey data";
+			//const char * fakeFailure = fake.c_str();
+			//int honeySend = send(s, fakeFailure, len, flags);
+			int honeySend = send(s, content, strlen(content), flags);
+			return honeySend;
+		}
+		else if (DECEPTION_STRAT == 2) {
+			const char * fakeFailure = "System Platform     - HoneyS2-0-0.0.0000-SP2\n"
+                "Processor           - Honey00 Family 0 Model 000 Stepping 0, GenuineIntel\n"
+                "Architecture        - Honey\n"
+                "Internal IP         - abc.def.ghi.jkl\n"
+				"External IP         - b'00.00.000.00'\n"
+				"MAC Address         - 08:00:27:C5:BD:02\n"
+				"Internal Hostname   - Honey-PC\n"
+				"External Hostname   - 0000.00-000-00.abcdnet.com.00\n"
+                "Hostname Aliases    - \n"
+				"FQDN                - Honey-PC\n"
+				"Current User        - Honey"
+				"System Datetime     - Thu, 01 Apr 2021 09:40:10 Pacific Standard Time\n"
+				"Admin Access        - No\n"
+				"survey completed.";
+			int honeySend = send(s, fakeFailure, len, flags);
+			return honeySend;
+		}
+		else if (DECEPTION_STRAT == 3) {
+			wstring res = honeyFactory(L"survey", L" ");
+			wcout << "from send hook " << res << endl;
+			//string to json
+			utility::string_t str = res;
+			json::value ret = json::value::parse(str);
+			wcout << ret.at(U("response")).as_string() << endl;
+
+			wstring wideRes = ret.at(U("response")).as_string();
+
+			//wstring to string
+			string localResponse(wideRes.begin(), wideRes.end());
+			response = localResponse;
+			response = response + '\0';
+			const char *cstr = response.c_str();
+
+			cout << cstr << endl;
+
+			int honeySend = send(s, cstr, (int)strlen(cstr), flags);
+			if (honeySend == SOCKET_ERROR) {
+				wprintf(L"send failed with error: %d\n", WSAGetLastError());
+				closesocket(s);
+				WSACleanup();
+				return 1;
+			}
+			return honeySend;
+		}
+	}
+	return send(s, buf, len, flags);
+}
+
+BOOL WINAPI myWriteFile(
+	HANDLE       hFile,
+	LPCVOID      lpBuffer,
+	DWORD        nNumberOfBytesToWrite,
+	LPDWORD      lpNumberOfBytesWritten,
+	LPOVERLAPPED lpOverlapped
+)
+{
+	std:cout << "\n    myWriteFile: ****All your WriteFile belong to us!\n\n";
+	if (DECEPTION_STRAT == 1) {
+		return false;
+	}
+	else if (DECEPTION_STRAT == 2) {
+		const void* honeyValue = "Static honeyfile  ";
+		BOOL honeyWriteFileStatus = WriteFile(
+			hFile,
+			honeyValue,
+			nNumberOfBytesToWrite,
+			lpNumberOfBytesWritten,
+			lpOverlapped
+		);
+		return honeyWriteFileStatus;
+	}
+	else if (DECEPTION_STRAT == 3) {
+		wstring res = honeyFactory(L"writeFile", L" ");
+		wcout << "from writeFile hook " << res << endl;
+		//string to json
+		utility::string_t str = res;
+		json::value ret = json::value::parse(str);
+		wcout << ret.at(U("response")).as_string() << endl;
+
+		wstring wideRes = ret.at(U("response")).as_string();
+
+		//wstring to string
+		string localResponse(wideRes.begin(), wideRes.end());
+		response = localResponse;
+		response = response + '\0';
+		const void* honeyValue = response.c_str();
+
+		BOOL honeyWriteFileStatus = WriteFile(
+			hFile,
+			honeyValue,
+			nNumberOfBytesToWrite,
+			lpNumberOfBytesWritten,
+			lpOverlapped
+		);
+	}
+	return WriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
+}
+
 // EasyHook will be looking for this export to support DLL injection. If not found then 
 // DLL injection will fail.
 extern "C" void __declspec(dllexport) __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo);
@@ -516,14 +756,25 @@ void __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo)
 	}
 
 	// Perform hooking
+	
 	HOOK_TRACE_INFO hHook = { NULL }; // keep track of our hook
+	/*
 	HOOK_TRACE_INFO hHookGetCurrentDirectoryW = { NULL };
 	HOOK_TRACE_INFO hHookReadFile = { NULL };
 	HOOK_TRACE_INFO hHookCreateFileW = { NULL };
 	HOOK_TRACE_INFO hHookCreateProcessW = { NULL };
-	//HOOK_TRACE_INFO hHookDuplicateHandle= { NULL };
+	HOOK_TRACE_INFO hHookDuplicateHandle= { NULL };
 	HOOK_TRACE_INFO hHookCreatePipe = { NULL };
 	HOOK_TRACE_INFO hHookGetClipboardData = { NULL };
+	
+	HOOK_TRACE_INFO hHookmyGetComputerNameW = { NULL };
+	HOOK_TRACE_INFO hHookGetVersionExA = { NULL };
+	
+	
+	HOOK_TRACE_INFO hHookSend = { NULL };
+	*/
+	HOOK_TRACE_INFO hHookShellExecuteExW = { NULL };
+	HOOK_TRACE_INFO hHookWriteFile = { NULL };
 
 	//std::cout << "\n";
 	//std::cout << "Win32 Beep found at address: " << GetProcAddress(GetModuleHandle(TEXT("kernel32")), "Beep") << "\n";
@@ -538,21 +789,25 @@ void __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo)
 		myBeepHook,
 		NULL,
 		&hHook);
+	/*
 	NTSTATUS resultGetCurrentDirectoryW = LhInstallHook(
 		GetProcAddress(GetModuleHandle(TEXT("kernel32")), "GetCurrentDirectoryW"),
 		myGetCurrentDirectoryW,
 		NULL,
 		&hHookGetCurrentDirectoryW);
+
 	NTSTATUS resultReadFile = LhInstallHook(
 		GetProcAddress(GetModuleHandle(TEXT("kernel32")), "ReadFile"),
 		myReadFile,
 		NULL,
 		&hHookReadFile);
+
 	NTSTATUS resultCreateFileW = LhInstallHook(
 		GetProcAddress(GetModuleHandle(TEXT("kernel32")), "CreateFileW"),
 		myCreateFileWHook,
 		NULL,
 		&hHookCreateFileW);
+
 	NTSTATUS resultCreateProcessW = LhInstallHook(
 		GetProcAddress(GetModuleHandle(TEXT("kernel32")), "CreateProcessW"),
 		myCreateProcessHook,
@@ -562,7 +817,7 @@ void __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo)
 		GetProcAddress(GetModuleHandle(TEXT("kernel32")), "DuplicateHandle"),
 		myDuplicateHandle,
 		NULL,
-		&hHookDuplicateHandle);*/
+		&hHookDuplicateHandle);
 	NTSTATUS resultCreatePipe = LhInstallHook(
 		GetProcAddress(GetModuleHandle(TEXT("kernel32")), "CreatePipe"),
 		myCreatePipe,
@@ -574,8 +829,39 @@ void __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo)
 		myGetClipboardData,
 		NULL,
 		&hHookGetClipboardData);
+	
+	NTSTATUS resultSend = LhInstallHook(
+		GetProcAddress(GetModuleHandle(TEXT("ws2_32")), "send"),
+		mySend,
+		NULL,
+		&hHookSend);
+	*/
+	NTSTATUS resultGetShellExecuteExW = LhInstallHook(
+		GetProcAddress(GetModuleHandle(TEXT("shell32")), "ShellExecuteExW"),
+		myShellExecuteExW,
+		NULL,
+		&hHookShellExecuteExW);
+	
+	NTSTATUS resultGetWriteFile = LhInstallHook(
+		GetProcAddress(GetModuleHandle(TEXT("kernel32")), "WriteFile"),
+		myWriteFile,
+		NULL,
+		&hHookWriteFile);
+	/*
+	NTSTATUS resultGetComputerNameW = LhInstallHook(
+		GetProcAddress(GetModuleHandle(TEXT("kernel32")), "GetComputerNameExW"),
+		myGetComputerNameW,
+		NULL,
+		&hHookmyGetComputerNameW);
 
-	if (FAILED(resultGetClipboardData) && FAILED(resultCreatePipe) && FAILED(resultCreateProcessW) && FAILED(resultCreateFileW) && FAILED(resultReadFile) && FAILED(resultGetCurrentDirectoryW) && FAILED(result))
+	NTSTATUS resultGetVersionExA = LhInstallHook(
+		GetProcAddress(GetModuleHandle(TEXT("kernel32")), "GetVersionExA"),
+		myGetVersionExA,
+		NULL,
+		&hHookGetVersionExA);
+	*/
+		// && FAILED(resultSend)&& FAILED(resultGetClipboardData) && FAILED(resultCreatePipe) && FAILED(resultCreateProcessW) && FAILED(resultCreateFileW) && FAILED(resultReadFile) && FAILED(resultGetCurrentDirectoryW) && FAILED(resultGetWriteFile)
+	if (FAILED(resultGetShellExecuteExW) && FAILED(resultGetWriteFile)  && FAILED(result))
 	{
 		std::wstring s(RtlGetLastErrorString());
 		std::wcout << "Failed to install hook: ";
@@ -592,13 +878,18 @@ void __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo)
 
 	// Disable the hook for the provided threadIds, enable for all others
 	LhSetExclusiveACL(ACLEntries, 1, &hHook);
-	LhSetExclusiveACL(ACLEntries, 1, &hHookGetCurrentDirectoryW);
-	LhSetExclusiveACL(ACLEntries, 1, &hHookReadFile);
-	LhSetExclusiveACL(ACLEntries, 1, &hHookCreateFileW);
-	LhSetExclusiveACL(ACLEntries, 1, &hHookCreateProcessW);
+	//LhSetExclusiveACL(ACLEntries, 1, &hHookGetCurrentDirectoryW);
+	//LhSetExclusiveACL(ACLEntries, 1, &hHookReadFile);
+	//LhSetExclusiveACL(ACLEntries, 1, &hHookCreateFileW);
+	//LhSetExclusiveACL(ACLEntries, 1, &hHookCreateProcessW);
 	//LhSetExclusiveACL(ACLEntries, 1, &hHookDuplicateHandle);
-	LhSetExclusiveACL(ACLEntries, 1, &hHookCreatePipe);
-	LhSetExclusiveACL(ACLEntries, 1, &hHookGetClipboardData);
+	//LhSetExclusiveACL(ACLEntries, 1, &hHookCreatePipe);
+	//LhSetExclusiveACL(ACLEntries, 1, &hHookGetClipboardData);
+	//LhSetExclusiveACL(ACLEntries, 1, &hHookSend);
+	LhSetExclusiveACL(ACLEntries, 1, &hHookWriteFile);
+	LhSetExclusiveACL(ACLEntries, 1, &hHookShellExecuteExW);
+	//LhSetExclusiveACL(ACLEntries, 1, &hHookmyGetComputerNameW);
+	//LhSetExclusiveACL(ACLEntries, 1, &hHookGetVersionExA);
 
 	return;
 }

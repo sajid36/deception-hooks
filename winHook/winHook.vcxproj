@@ -116,7 +116,8 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;WINHOOK_EXPORTS;%(PreprocessorDefinitions);_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>C:\Users\sajid\AppData\Local\Programs\Python\Python37-32\libs;C:\Users\sajid\AppData\Local\Programs\Python\Python37-32\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\WalterD\Documents\Work\ONR_Malploy\deception-hooks\packages\cpprestsdk.v141.2.10.12.1\build\native\include;C:\Users\WalterD\Documents\Work\ONR_Malploy\deception-hooks\winHook\cpprest;C:\Users\sajid\AppData\Local\Programs\Python\Python37-32\libs;C:\Users\sajid\AppData\Local\Programs\Python\Python37-32\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalUsingDirectories>C:\Users\WalterD\Documents\Work\ONR_Malploy\deception-hooks\winHook\cpprest;%(AdditionalUsingDirectories)</AdditionalUsingDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
