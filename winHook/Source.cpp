@@ -258,6 +258,7 @@ BOOL WINAPI myReadFile(HANDLE hFile,
 		if (*lpNumberOfBytesRead > 1) {
 			cout << "connect to honey server to alter content " << endl;
 			char *content = "this is altered content ";
+			//honeyFactory("readfile", "test.txt");
 
 			// check for error and size of the returned buffer.
 			memcpy(lpBuffer, content, strlen(content));
@@ -312,6 +313,7 @@ DWORD WINAPI myGetCurrentDirectoryW(DWORD  nBufferLength,
 	LPTSTR lpBuffer)
 {
 	std::cout << "\n    GetCurrentDirectory Hook: ****All your GetCurrentDirectory belong to us!\n\n";
+	
 	wstring res = honeyFactory(L"currentDirectory", L" ");
 	wcout << "from GetCurrentDirectory hook " << res << endl;
 	
