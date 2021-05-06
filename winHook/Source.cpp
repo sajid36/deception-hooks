@@ -1,6 +1,5 @@
 #include "stdafx.h"
 #define WIN32_LEAN_AND_MEAN
-
 #include <easyhook.h>
 #include <string>
 #include <windows.h>
@@ -23,10 +22,14 @@
 #define DEFAULT_PORT "8888"
 #define DEFAULT_IP "localhost"
 
-#define DECEPTION_STRAT  1 // FakeFailure (Show failure despite success)
+//#define DECEPTION_STRAT  1 // FakeFailure (Show failure despite success)
 //#define DECEPTION_STRAT  2 // FakeSuccess (Show altered content)
 //#define DECEPTION_STRAT  3 // FakeExecute (Get data from honey factory)
 //#define DECEPTION_STRAT  4 // NativeExecute (Let attacker perform action)
+
+int Behave = 0;
+std::string HoneyServer;
+int DECEPTION_STRAT = 0;
 
 using namespace std;
 using namespace web;
@@ -42,6 +45,26 @@ HANDLE pipeReadHandle = NULL;
 int childProcessReadFlag = 0;
 std::string response;
 
+
+struct Config {
+	int    Behave;
+	string HoneyServer;
+	int Strat;
+};
+
+void loadConfig(Config& config) {
+	ifstream fin("config.txt");
+	std::string line;
+	while (getline(fin, line)) {
+		istringstream sin(line.substr(line.find("=") + 1));
+		if (line.find("Behave") != -1)
+			sin >> config.Behave;
+		else if (line.find("HoneyServer") != -1)
+			sin >> config.HoneyServer;
+		else if (line.find("Strat") != -1)
+			sin >> config.Strat;
+	}
+}
 void display_json(
 	json::value const & jvalue,
 	utility::string_t const & prefix)
@@ -123,7 +146,7 @@ HANDLE WINAPI myCreateFileWHook(LPCWSTR lpFileName,
 	std::wstring lpName = lpFileName;
 	
 	wstring ws(lpFileName);
-	string fileName = string(ws.begin(), ws.end());
+	std::string fileName = std::string(ws.begin(), ws.end());
 	cout << fileName << endl;
 
 	HANDLE oFile = CreateFileW(lpFileName,
@@ -225,33 +248,55 @@ DWORD WINAPI myGetCurrentDirectoryW(DWORD  nBufferLength,
 	LPTSTR lpBuffer)
 {
 	std::cout << "\n    GetCurrentDirectory Hook: ****All your GetCurrentDirectory belong to us!\n\n";
-	
-	wstring res = honeyFactory(L"currentDirectory", L" ");
-	wcout << "from GetCurrentDirectory hook " << res << endl;
-	
-	
-	//string to json
-	utility::string_t s = res;
-	json::value ret = json::value::parse(s);
-	wcout << ret.at(U("currentDirectory")).as_string() << endl;
-
-	wstring wideRes = ret.at(U("currentDirectory")).as_string();
-
-	//wstring to string
-	std::string localResponse (wideRes.begin(), wideRes.end());
-	response = localResponse;
-	response = response + '\0';
-
-
-	DWORD returnLength  = response.length();
-
-	int i;
-	for (i = 0; i<response.length(); i++)
-	{
-		lpBuffer[i] = response[i];
+	if (DECEPTION_STRAT == 1) {
+		return 0;
 	}
-	lpBuffer[i++] = '\0';
-	return returnLength;
+	else if (DECEPTION_STRAT == 2) {
+
+		int i;
+		std::string directory = "D:\\Dropbox\\Dropbox\\transfer";
+		directory = directory + '\0';
+		DWORD returnLength = directory.length();
+		for (i = 0; i<directory.length(); i++)
+		{
+			lpBuffer[i] = directory[i];
+		}
+		lpBuffer[i++] = '\0';
+		return returnLength;
+	}
+	else if (DECEPTION_STRAT == 3) {
+
+		wstring res = honeyFactory(L"currentDirectory", L" ");
+		wcout << "from GetCurrentDirectory hook " << res << endl;
+
+
+		//string to json
+		utility::string_t s = res;
+		json::value ret = json::value::parse(s);
+		wcout << ret.at(U("currentDirectory")).as_string() << endl;
+
+		wstring wideRes = ret.at(U("currentDirectory")).as_string();
+
+		//wstring to string
+		std::string localResponse(wideRes.begin(), wideRes.end());
+		response = localResponse;
+		response = response + '\0';
+
+
+		DWORD returnLength = response.length();
+
+		int i;
+		for (i = 0; i < response.length(); i++)
+		{
+			lpBuffer[i] = response[i];
+		}
+		lpBuffer[i++] = '\0';
+		return returnLength;
+	}
+	else {
+		return GetCurrentDirectoryW(nBufferLength,
+			lpBuffer);
+	}
 }
 
 BOOL WINAPI myCreateProcessHook(LPCWSTR lpApplicationName,
@@ -291,7 +336,7 @@ BOOL WINAPI myCreateProcessHook(LPCWSTR lpApplicationName,
 	wstring wideRes = ret.at(U("response")).as_string();
 
 	//wstring to string
-	std:string localResponse(wideRes.begin(), wideRes.end());
+	std::string localResponse(wideRes.begin(), wideRes.end());
 	response = localResponse;
 	response = response + '\0';
 
@@ -372,17 +417,79 @@ HANDLE WINAPI myGetClipboardData(UINT uFormat)
 	std::cout << "\n    BeepHook: ****All your GetClipboardData belong to us!\n\n";
 	//string reply = honey("Beep", "");
 	cout << "inside GetClipboardData" << endl;
+	HANDLE hData = GetClipboardData(CF_TEXT);
+	cout << hData << endl;
+	char * pszText = static_cast<char*>(GlobalLock(hData));
+	std::string text(pszText);
+	cout << "get "<<text << endl;
+	GlobalUnlock(hData);
+	EmptyClipboard();
+	CloseClipboard();
+
+
+
+	const char* output = "Test";
+	const size_t len = strlen(output) + 1;
+	HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+	memcpy(GlobalLock(hMem), output, len);
+	GlobalUnlock(hMem);
+	EmptyClipboard();
+	OpenClipboard(0);
+	hData = SetClipboardData(CF_TEXT, hMem);
+	cout << hData << endl;
+	char * pszText1 = static_cast<char*>(GlobalLock(hData));
+	std::string text1(pszText1);
+	cout << "set " << text1 << endl;
+	GlobalUnlock(hData);
+
 	
-	wchar_t s[] = L"msajid@uncc.edu 123456789";
-	HGLOBAL hglbCopy = GetClipboardData(uFormat);
+
+/*	wchar_t s[] = L"msajid@uncc.edu 123456789";
+	HGLOBAL hglbCopy = GlobalAlloc(GMEM_MOVEABLE, wcslen(s) + 1);
+	LPTSTR  lptstrCopy = (LPTSTR)GlobalLock(hglbCopy);
+	memcpy(pszText, s,
+		wcslen(s));
+	lptstrCopy[wcslen(s)] = (TCHAR)0;    // null character 
+	GlobalUnlock(hglbCopy);
+	hData = SetClipboardData(CF_TEXT, hglbCopy);
+	cout << hData << endl;
+	char * pszText1 = static_cast<char*>(GlobalLock(hData));
+	std::string text1(pszText1);
+	cout << "set "<<text1 << endl;
+	GlobalUnlock(hData);*/
+
+
+	HANDLE hData2 = GetClipboardData(CF_TEXT);
+	cout << hData2 << endl;
+	char * pszText2 = static_cast<char*>(GlobalLock(hData2));
+	std::string text2(pszText2);
+	cout << "get " << text2 << endl;
+	GlobalUnlock(hData2);
+
+	/*
+	HGLOBAL hglbCopy = GlobalAlloc(GMEM_MOVEABLE,
+		(s.length() + 1) * sizeof(TCHAR));
+
 	LPTSTR lptstrCopy = (LPTSTR)GlobalLock(hglbCopy);
 	memcpy(lptstrCopy, &s,
-		(wcslen(s) + 1) * sizeof(wchar_t));
+		(s.length() + 1) * sizeof(wchar_t));
 	lptstrCopy[sizeof(s)] = (TCHAR)0;    // null character 
 	GlobalUnlock(hglbCopy);
 	SetClipboardData(uFormat, hglbCopy);
-	return lptstrCopy;
-}BOOL WINAPI myGetComputerNameW(COMPUTER_NAME_FORMAT NameType, LPWSTR lpBuffer, LPDWORD	nSize)
+
+	hData = GetClipboardData(uFormat);
+	cout << hData << endl;
+	char * pszText1 = static_cast<char*>(GlobalLock(hData));
+	std::string text1(pszText1);
+	cout << text1 << endl;
+	GlobalUnlock(hData);*/
+
+
+
+	return hData2;
+}
+
+BOOL WINAPI myGetComputerNameW(COMPUTER_NAME_FORMAT NameType, LPWSTR lpBuffer, LPDWORD	nSize)
 {
 std:cout << "\n    myGetComputerNameWHook: ****All your ComputerNames belong to us!\n\n";
 	LPVOID honeyReply;
@@ -474,7 +581,7 @@ std:cout << "\n    myShellExecuteExW: ****All your ShellExecuteExW belong to us!
 
 		wstring wideRes = ret.at(U("response")).as_string();
 		//wstring to string
-		string localResponse(wideRes.begin(), wideRes.end());
+		std::string localResponse(wideRes.begin(), wideRes.end());
 		response = localResponse;
 		response = response + '\0';
 
@@ -500,8 +607,8 @@ int WINAPI mySend(
 	cout << "\n    mySend: ****All your send belong to us!\n\n";
 	cout << len << endl;
 
-	string sub_str = buf;
-	string com = "System";
+	std::string sub_str = buf;
+	std::string com = "System";
 	sub_str = sub_str.substr(1, 6);
 
 	cout << sub_str.compare(com) << endl;
@@ -545,7 +652,7 @@ int WINAPI mySend(
 			wstring wideRes = ret.at(U("response")).as_string();
 
 			//wstring to string
-			string localResponse(wideRes.begin(), wideRes.end());
+			std::string localResponse(wideRes.begin(), wideRes.end());
 			response = localResponse;
 			response = response + '\0';
 			const char *cstr = response.c_str();
@@ -573,7 +680,7 @@ BOOL WINAPI myWriteFile(
 	LPOVERLAPPED lpOverlapped
 )
 {
-std:cout << "\n    myWriteFile: ****All your WriteFile belong to us!\n\n";
+	std:cout << "\n    myWriteFile: ****All your WriteFile belong to us!\n\n";
 	if (DECEPTION_STRAT == 1) {
 		return false;
 	}
@@ -599,7 +706,7 @@ std:cout << "\n    myWriteFile: ****All your WriteFile belong to us!\n\n";
 		wstring wideRes = ret.at(U("response")).as_string();
 
 		//wstring to string
-		string localResponse(wideRes.begin(), wideRes.end());
+		std::string localResponse(wideRes.begin(), wideRes.end());
 		response = localResponse;
 		response = response + '\0';
 		const void* honeyValue = response.c_str();
@@ -639,21 +746,16 @@ void __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo)
 	// Perform hooking
 
 	HOOK_TRACE_INFO hHook = { NULL }; // keep track of our hook
-									  /*
-									  HOOK_TRACE_INFO hHookGetCurrentDirectoryW = { NULL };
-									  HOOK_TRACE_INFO hHookReadFile = { NULL };
-									  HOOK_TRACE_INFO hHookCreateFileW = { NULL };
-									  HOOK_TRACE_INFO hHookCreateProcessW = { NULL };
-									  HOOK_TRACE_INFO hHookDuplicateHandle= { NULL };
-									  HOOK_TRACE_INFO hHookCreatePipe = { NULL };
-									  HOOK_TRACE_INFO hHookGetClipboardData = { NULL };
-
-									  HOOK_TRACE_INFO hHookmyGetComputerNameW = { NULL };
-									  HOOK_TRACE_INFO hHookGetVersionExA = { NULL };
-
-
-									  HOOK_TRACE_INFO hHookSend = { NULL };
-									  */
+	HOOK_TRACE_INFO hHookReadFile = { NULL };
+	HOOK_TRACE_INFO hHookCreateFileW = { NULL };
+	HOOK_TRACE_INFO hHookGetCurrentDirectoryW = { NULL };
+	HOOK_TRACE_INFO hHookCreateProcessW = { NULL };
+	HOOK_TRACE_INFO hHookDuplicateHandle= { NULL };
+	HOOK_TRACE_INFO hHookCreatePipe = { NULL };
+	HOOK_TRACE_INFO hHookGetClipboardData = { NULL };
+	HOOK_TRACE_INFO hHookmyGetComputerNameW = { NULL };
+	HOOK_TRACE_INFO hHookGetVersionExA = { NULL };
+	HOOK_TRACE_INFO hHookSend = { NULL };
 	HOOK_TRACE_INFO hHookShellExecuteExW = { NULL };
 	HOOK_TRACE_INFO hHookWriteFile = { NULL };
 
@@ -665,79 +767,109 @@ void __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo)
 	//std::cout << "Win32 CreateProcessW found at address: " << GetProcAddress(GetModuleHandle(TEXT("kernel32")), "CreateProcessW") << "\n";
 
 	// Install the hook
-	NTSTATUS result = LhInstallHook(
-		GetProcAddress(GetModuleHandle(TEXT("kernel32")), "Beep"),
-		myBeepHook,
-		NULL,
-		&hHook);
-	/*
-	NTSTATUS resultGetCurrentDirectoryW = LhInstallHook(
-	GetProcAddress(GetModuleHandle(TEXT("kernel32")), "GetCurrentDirectoryW"),
-	myGetCurrentDirectoryW,
-	NULL,
-	&hHookGetCurrentDirectoryW);
-	NTSTATUS resultReadFile = LhInstallHook(
-	GetProcAddress(GetModuleHandle(TEXT("kernel32")), "ReadFile"),
-	myReadFile,
-	NULL,
-	&hHookReadFile);
-	NTSTATUS resultCreateFileW = LhInstallHook(
-	GetProcAddress(GetModuleHandle(TEXT("kernel32")), "CreateFileW"),
-	myCreateFileWHook,
-	NULL,
-	&hHookCreateFileW);
-	NTSTATUS resultCreateProcessW = LhInstallHook(
-	GetProcAddress(GetModuleHandle(TEXT("kernel32")), "CreateProcessW"),
-	myCreateProcessHook,
-	NULL,
-	&hHookCreateProcessW);
-	/*NTSTATUS resultDuplicateHandle = LhInstallHook(
-	GetProcAddress(GetModuleHandle(TEXT("kernel32")), "DuplicateHandle"),
-	myDuplicateHandle,
-	NULL,
-	&hHookDuplicateHandle);
-	NTSTATUS resultCreatePipe = LhInstallHook(
-	GetProcAddress(GetModuleHandle(TEXT("kernel32")), "CreatePipe"),
-	myCreatePipe,
-	NULL,
-	&hHookCreatePipe);
-	NTSTATUS resultGetClipboardData = LhInstallHook(
-	GetProcAddress(GetModuleHandle(TEXT("user32")), "GetClipboardData"),
-	myGetClipboardData,
-	NULL,
-	&hHookGetClipboardData);
 
-	NTSTATUS resultSend = LhInstallHook(
-	GetProcAddress(GetModuleHandle(TEXT("ws2_32")), "send"),
-	mySend,
-	NULL,
-	&hHookSend);
-	*/
-	NTSTATUS resultGetShellExecuteExW = LhInstallHook(
-		GetProcAddress(GetModuleHandle(TEXT("shell32")), "ShellExecuteExW"),
-		myShellExecuteExW,
-		NULL,
-		&hHookShellExecuteExW);
+	Config config;
+	loadConfig(config);
+	cout << config.Behave << '\n';
+	cout << config.HoneyServer << '\n';
+	cout << config.Strat << '\n';
 
-	NTSTATUS resultGetWriteFile = LhInstallHook(
-		GetProcAddress(GetModuleHandle(TEXT("kernel32")), "WriteFile"),
-		myWriteFile,
+	Behave = config.Behave;
+	HoneyServer = config.HoneyServer;
+	DECEPTION_STRAT = config.Strat;
+
+	if (Behave == 1) {
+		NTSTATUS resultGetClipboardData = LhInstallHook(
+			GetProcAddress(GetModuleHandle(TEXT("user32")), "GetClipboardData"),
+			myGetClipboardData,
+			NULL,
+			&hHookGetClipboardData);
+	}
+	if (Behave == 2) {
+		NTSTATUS resultSend = LhInstallHook(
+			GetProcAddress(GetModuleHandle(TEXT("ws2_32")), "send"),
+			mySend,
+			NULL,
+			&hHookSend);
+
+		NTSTATUS resultGetShellExecuteExW = LhInstallHook(
+			GetProcAddress(GetModuleHandle(TEXT("shell32")), "ShellExecuteExW"),
+			myShellExecuteExW,
+			NULL,
+			&hHookShellExecuteExW);
+
+		NTSTATUS resultGetWriteFile = LhInstallHook(
+			GetProcAddress(GetModuleHandle(TEXT("kernel32")), "WriteFile"),
+			myWriteFile,
+			NULL,
+			&hHookWriteFile);
+
+		NTSTATUS result = LhInstallHook(
+			GetProcAddress(GetModuleHandle(TEXT("kernel32")), "Beep"),
+			myBeepHook,
+			NULL,
+			&hHook);
+
+		NTSTATUS resultReadFile = LhInstallHook(
+			GetProcAddress(GetModuleHandle(TEXT("kernel32")), "ReadFile"),
+			myReadFile,
+			NULL,
+			&hHookReadFile);
+
+		NTSTATUS resultCreateFileW = LhInstallHook(
+			GetProcAddress(GetModuleHandle(TEXT("kernel32")), "CreateFileW"),
+			myCreateFileWHook,
+			NULL,
+			&hHookCreateFileW);
+
+		NTSTATUS resultCreateProcessW = LhInstallHook(
+			GetProcAddress(GetModuleHandle(TEXT("kernel32")), "CreateProcessW"),
+			myCreateProcessHook,
+			NULL,
+			&hHookCreateProcessW);
+
+		/*NTSTATUS resultDuplicateHandle = LhInstallHook(
+		GetProcAddress(GetModuleHandle(TEXT("kernel32")), "DuplicateHandle"),
+		myDuplicateHandle,
 		NULL,
-		&hHookWriteFile);
+		&hHookDuplicateHandle);*/
+
+		NTSTATUS resultCreatePipe = LhInstallHook(
+			GetProcAddress(GetModuleHandle(TEXT("kernel32")), "CreatePipe"),
+			myCreatePipe,
+			NULL,
+			&hHookCreatePipe);
+	}
+
+	
+	
 	/*
 	NTSTATUS resultGetComputerNameW = LhInstallHook(
 	GetProcAddress(GetModuleHandle(TEXT("kernel32")), "GetComputerNameExW"),
 	myGetComputerNameW,
 	NULL,
 	&hHookmyGetComputerNameW);
-	NTSTATUS resultGetVersionExA = LhInstallHook(
-	GetProcAddress(GetModuleHandle(TEXT("kernel32")), "GetVersionExA"),
-	myGetVersionExA,
-	NULL,
-	&hHookGetVersionExA);
 	*/
+	if(Behave == 3){
+		NTSTATUS resultGetVersionExA = LhInstallHook(
+			GetProcAddress(GetModuleHandle(TEXT("kernel32")), "GetVersionExA"),
+			myGetVersionExA,
+			NULL,
+			&hHookGetVersionExA);
+	}
+	if (Behave == 6) {
+		NTSTATUS resultGetCurrentDirectoryW = LhInstallHook(
+			GetProcAddress(GetModuleHandle(TEXT("kernel32")), "GetCurrentDirectoryW"),
+			myGetCurrentDirectoryW,
+			NULL,
+			&hHookGetCurrentDirectoryW);
+	}
+	
+
+
 	// && FAILED(resultSend)&& FAILED(resultGetClipboardData) && FAILED(resultCreatePipe) && FAILED(resultCreateProcessW) && FAILED(resultCreateFileW) && FAILED(resultReadFile) && FAILED(resultGetCurrentDirectoryW) && FAILED(resultGetWriteFile)
-	if (FAILED(resultGetShellExecuteExW) && FAILED(resultGetWriteFile) && FAILED(result))
+	/*
+	if (FAILED(resultSend) && FAILED(resultGetClipboardData) && FAILED(resultCreatePipe) && FAILED(resultCreateProcessW) && FAILED(resultCreateFileW) && FAILED(resultReadFile) && FAILED(resultGetCurrentDirectoryW) && FAILED(resultGetWriteFile) && FAILED(resultGetShellExecuteExW) && FAILED(resultGetWriteFile) && FAILED(result))
 	{
 		std::wstring s(RtlGetLastErrorString());
 		std::wcout << "Failed to install hook: ";
@@ -746,26 +878,35 @@ void __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* inRemoteInfo)
 	else
 	{
 		std::cout << "Hook 'myBeepHook installed successfully.\n";
-	}
+	}*/
 
 	// If the threadId in the ACL is set to 0,
 	// then internally EasyHook uses GetCurrentThreadId()
 	ULONG ACLEntries[1] = { 0 };
 
 	// Disable the hook for the provided threadIds, enable for all others
-	LhSetExclusiveACL(ACLEntries, 1, &hHook);
-	//LhSetExclusiveACL(ACLEntries, 1, &hHookGetCurrentDirectoryW);
-	//LhSetExclusiveACL(ACLEntries, 1, &hHookReadFile);
-	//LhSetExclusiveACL(ACLEntries, 1, &hHookCreateFileW);
-	//LhSetExclusiveACL(ACLEntries, 1, &hHookCreateProcessW);
-	//LhSetExclusiveACL(ACLEntries, 1, &hHookDuplicateHandle);
-	//LhSetExclusiveACL(ACLEntries, 1, &hHookCreatePipe);
-	//LhSetExclusiveACL(ACLEntries, 1, &hHookGetClipboardData);
-	//LhSetExclusiveACL(ACLEntries, 1, &hHookSend);
-	LhSetExclusiveACL(ACLEntries, 1, &hHookWriteFile);
-	LhSetExclusiveACL(ACLEntries, 1, &hHookShellExecuteExW);
-	//LhSetExclusiveACL(ACLEntries, 1, &hHookmyGetComputerNameW);
-	//LhSetExclusiveACL(ACLEntries, 1, &hHookGetVersionExA);
+	std::cout << "****Hooked****\n";
+	if (Behave == 1) {
+		LhSetExclusiveACL(ACLEntries, 1, &hHookGetClipboardData);
+	}
+	if (Behave == 2) {
+		LhSetExclusiveACL(ACLEntries, 1, &hHookSend);
+		LhSetExclusiveACL(ACLEntries, 1, &hHookWriteFile);
+		LhSetExclusiveACL(ACLEntries, 1, &hHookShellExecuteExW);
+		LhSetExclusiveACL(ACLEntries, 1, &hHookmyGetComputerNameW);
+		LhSetExclusiveACL(ACLEntries, 1, &hHook);
+		LhSetExclusiveACL(ACLEntries, 1, &hHookReadFile);
+		LhSetExclusiveACL(ACLEntries, 1, &hHookCreateFileW);
+		LhSetExclusiveACL(ACLEntries, 1, &hHookCreateProcessW);
+		LhSetExclusiveACL(ACLEntries, 1, &hHookDuplicateHandle);
+		LhSetExclusiveACL(ACLEntries, 1, &hHookCreatePipe);
+	}
+	if (Behave == 3) {
+		LhSetExclusiveACL(ACLEntries, 1, &hHookGetVersionExA);
+	}
+	if (Behave == 6) {
+		LhSetExclusiveACL(ACLEntries, 1, &hHookGetCurrentDirectoryW);
+	}
 
 	return;
 }
